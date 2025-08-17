@@ -41,16 +41,13 @@ parent_lookup = {}
 initialized = False
 
 def initialize_models():
-    """Initialize sentence transformer model and Pinecone index"""
-    global model, index, initialized
+    """Initialize Pinecone connection first, lazy load model"""
+    global index, initialized
     
     if initialized:
         return
         
     try:
-        logger.info("Loading embedding model...")
-        model = SentenceTransformer(EMBED_MODEL)
-        
         logger.info("Connecting to Pinecone...")
         if not PINECONE_API_KEY:
             raise ValueError("PINECONE_API_KEY environment variable is required")
@@ -76,11 +73,20 @@ def initialize_models():
         index = pc.Index(PINECONE_INDEX_NAME)
         load_data_files()
         initialized = True
-        logger.info("Models initialized successfully")
+        logger.info("Pinecone initialized successfully")
         
     except Exception as e:
-        logger.error(f"Error initializing models: {str(e)}")
+        logger.error(f"Error initializing: {str(e)}")
         raise
+
+def get_model():
+    """Lazy load the embedding model only when needed"""
+    global model
+    if model is None:
+        logger.info("Loading embedding model on first use...")
+        model = SentenceTransformer(EMBED_MODEL)
+        logger.info("Embedding model loaded successfully")
+    return model
 
 def load_data_files():
     """Load parent and child data files"""
@@ -121,6 +127,9 @@ def upload_data_to_pinecone():
         
         logger.info(f"Uploading {len(children)} child entries to Pinecone...")
         
+        # Get model (lazy loaded)
+        embedding_model = get_model()
+        
         BATCH_SIZE = 50
         uploaded_count = 0
         
@@ -132,7 +141,7 @@ def upload_data_to_pinecone():
                 parent_obj = parent_lookup.get(parent_id, {})
                 
                 # Create embedding
-                embedding = model.encode(child["text"]).tolist()
+                embedding = embedding_model.encode(child["text"]).tolist()
                 
                 vectors.append({
                     "id": child_id,
@@ -161,8 +170,11 @@ def upload_data_to_pinecone():
 def search_similar_chunks(query, top_k=5):
     """Search for similar chunks in Pinecone"""
     try:
+        # Get model (lazy loaded)
+        embedding_model = get_model()
+        
         # Create query embedding
-        query_embedding = model.encode(query).tolist()
+        query_embedding = embedding_model.encode(query).tolist()
         
         # Search Pinecone
         results = index.query(
@@ -221,12 +233,11 @@ Answer:"""
 
 @app.route("/", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
-    ensure_initialized()
+    """Health check endpoint - don't initialize models here"""
     return jsonify({
         "status": "healthy",
         "message": "RAG API is running",
-        "models_loaded": model is not None and index is not None,
+        "initialized": initialized,
         "gemini_configured": gemini_model is not None,
         "webhook_url": f"{request.url_root}webhook"
     })
