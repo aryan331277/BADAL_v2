@@ -18,10 +18,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configuration
+# Configuration - Using smaller, faster model
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "badal-embeddings")
-EMBED_MODEL = os.getenv("EMBED_MODEL", "intfloat/e5-large-v2")
+# Switch to smaller model (384 dimensions vs 1024)
+EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
 
@@ -56,13 +57,13 @@ def initialize_models():
         
         pc = Pinecone(api_key=PINECONE_API_KEY)
         
-        # Create index if it doesn't exist
+        # Create index if it doesn't exist - using 384 dimensions for smaller model
         existing_indexes = pc.list_indexes()
         if PINECONE_INDEX_NAME not in [i.name for i in existing_indexes]:
             logger.info(f"Creating index: {PINECONE_INDEX_NAME}")
             pc.create_index(
                 name=PINECONE_INDEX_NAME,
-                dimension=1024,  # e5-large-v2 dimension
+                dimension=384,  # all-MiniLM-L6-v2 dimension
                 metric="cosine",
                 spec={
                     "serverless": {
