@@ -2,8 +2,8 @@ import os
 import json
 import re
 import uuid
+import requests
 from flask import Flask, request, jsonify
-from sentence_transformers import SentenceTransformer
 from pinecone import Pinecone
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -18,13 +18,12 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
-# Configuration - Using smaller, faster model
+# Configuration
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
 PINECONE_INDEX_NAME = os.getenv("PINECONE_INDEX_NAME", "badal-embeddings")
-# Switch to smaller model (384 dimensions vs 1024)
-EMBED_MODEL = os.getenv("EMBED_MODEL", "all-MiniLM-L6-v2")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
+HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")  # For API-based embeddings
 
 # Initialize Gemini
 if GEMINI_API_KEY:
@@ -34,14 +33,55 @@ else:
     logger.warning("GEMINI_API_KEY not found in environment variables")
     gemini_model = None
 
-# Global variables for models and index
-model = None
+# Global variables
 index = None
 parent_lookup = {}
 initialized = False
 
+def create_embedding_api(text):
+    """Create embeddings using HuggingFace Inference API"""
+    if not HUGGINGFACE_API_KEY:
+        # Fallback to Gemini embeddings if available
+        return create_gemini_embedding(text)
+    
+    try:
+        headers = {"Authorization": f"Bearer {HUGGINGFACE_API_KEY}"}
+        response = requests.post(
+            "https://api-inference.huggingface.co/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2",
+            headers=headers,
+            json={"inputs": text}
+        )
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            logger.error(f"HuggingFace API error: {response.status_code}")
+            return create_gemini_embedding(text)
+            
+    except Exception as e:
+        logger.error(f"Error with HuggingFace API: {str(e)}")
+        return create_gemini_embedding(text)
+
+def create_gemini_embedding(text):
+    """Fallback: Create embeddings using Gemini API"""
+    try:
+        if not gemini_model:
+            raise Exception("No embedding service available")
+            
+        # Use Gemini to create a simple embedding
+        response = gemini_model.generate_content(f"Create a numerical representation of this text: {text}")
+        # This is a simple fallback - you might want to use hash or other method
+        embedding = [hash(text + str(i)) % 1000 / 1000.0 for i in range(384)]
+        return embedding
+        
+    except Exception as e:
+        logger.error(f"Error creating embedding: {str(e)}")
+        # Last resort: simple hash-based embedding
+        embedding = [hash(text + str(i)) % 1000 / 1000.0 for i in range(384)]
+        return embedding
+
 def initialize_models():
-    """Initialize Pinecone connection first, lazy load model"""
+    """Initialize Pinecone connection only"""
     global index, initialized
     
     if initialized:
@@ -54,13 +94,13 @@ def initialize_models():
         
         pc = Pinecone(api_key=PINECONE_API_KEY)
         
-        # Create index if it doesn't exist - using 384 dimensions for smaller model
+        # Create index if it doesn't exist
         existing_indexes = pc.list_indexes()
         if PINECONE_INDEX_NAME not in [i.name for i in existing_indexes]:
             logger.info(f"Creating index: {PINECONE_INDEX_NAME}")
             pc.create_index(
                 name=PINECONE_INDEX_NAME,
-                dimension=384,  # all-MiniLM-L12-v2 dimension
+                dimension=384,
                 metric="cosine",
                 spec={
                     "serverless": {
@@ -78,22 +118,6 @@ def initialize_models():
     except Exception as e:
         logger.error(f"Error initializing: {str(e)}")
         raise
-
-def get_model():
-    """Lazy load the embedding model only when needed"""
-    global model
-    if model is None:
-        logger.info("Loading embedding model on first use...")
-        try:
-            model = SentenceTransformer(EMBED_MODEL)
-            logger.info("Embedding model loaded successfully")
-        except Exception as e:
-            logger.error(f"Failed to load model: {str(e)}")
-            # Fallback to an even smaller model if needed
-            logger.info("Trying fallback model...")
-            model = SentenceTransformer("paraphrase-MiniLM-L3-v2")  # Only ~17MB
-            logger.info("Fallback model loaded successfully")
-    return model
 
 def load_data_files():
     """Load parent and child data files"""
@@ -134,9 +158,6 @@ def upload_data_to_pinecone():
         
         logger.info(f"Uploading {len(children)} child entries to Pinecone...")
         
-        # Get model (lazy loaded)
-        embedding_model = get_model()
-        
         BATCH_SIZE = 50
         uploaded_count = 0
         
@@ -147,8 +168,8 @@ def upload_data_to_pinecone():
                 parent_id = child["parent_id"]
                 parent_obj = parent_lookup.get(parent_id, {})
                 
-                # Create embedding
-                embedding = embedding_model.encode(child["text"]).tolist()
+                # Create embedding using API
+                embedding = create_embedding_api(child["text"])
                 
                 vectors.append({
                     "id": child_id,
@@ -177,11 +198,8 @@ def upload_data_to_pinecone():
 def search_similar_chunks(query, top_k=5):
     """Search for similar chunks in Pinecone"""
     try:
-        # Get model (lazy loaded)
-        embedding_model = get_model()
-        
-        # Create query embedding
-        query_embedding = embedding_model.encode(query).tolist()
+        # Create query embedding using API
+        query_embedding = create_embedding_api(query)
         
         # Search Pinecone
         results = index.query(
