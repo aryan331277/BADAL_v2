@@ -1,0 +1,17 @@
+.git
+.gitignore
+README.md
+.vscode
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+tests/
+docs/
+*.md
+.DS_Store
+Thumbs.db
+node_modules
