@@ -12,13 +12,11 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     apk del gcc musl-dev libffi-dev && \
     rm -rf ~/.cache
 
-# Copy only essential files
-COPY app.py ./
-COPY Procfile ./
-COPY *.json ./
+# Copy all necessary files
+COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8080
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "300", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:$PORT", "--workers", "1", "--timeout", "300", "app:app"]
