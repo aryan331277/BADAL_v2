@@ -60,7 +60,7 @@ def initialize_models():
             logger.info(f"Creating index: {PINECONE_INDEX_NAME}")
             pc.create_index(
                 name=PINECONE_INDEX_NAME,
-                dimension=384,  # all-MiniLM-L6-v2 dimension
+                dimension=384,  # all-MiniLM-L12-v2 dimension
                 metric="cosine",
                 spec={
                     "serverless": {
@@ -84,8 +84,15 @@ def get_model():
     global model
     if model is None:
         logger.info("Loading embedding model on first use...")
-        model = SentenceTransformer(EMBED_MODEL)
-        logger.info("Embedding model loaded successfully")
+        try:
+            model = SentenceTransformer(EMBED_MODEL)
+            logger.info("Embedding model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load model: {str(e)}")
+            # Fallback to an even smaller model if needed
+            logger.info("Trying fallback model...")
+            model = SentenceTransformer("paraphrase-MiniLM-L3-v2")  # Only ~17MB
+            logger.info("Fallback model loaded successfully")
     return model
 
 def load_data_files():
