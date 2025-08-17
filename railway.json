@@ -1,0 +1,22 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "buildCommand": "echo 'Building with extended timeout'",
+    "buildTimeout": 1800
+  },
+  "deploy": {
+    "healthcheckPath": "/",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 3
+  },
+  "environments": {
+    "production": {
+      "variables": {
+        "PORT": "8080",
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}
