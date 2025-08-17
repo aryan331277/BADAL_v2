@@ -1,39 +1,24 @@
-# Use Python slim image to reduce base size
-FROM python:3.11-slim
+FROM python:3.11-alpine
 
-# Set working directory
+# Install minimal dependencies
+RUN apk add --no-cache gcc musl-dev libffi-dev
+
 WORKDIR /app
 
-# Install system dependencies (minimal)
-RUN apt-get update && apt-get install -y \
-    gcc \
-    g++ \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better caching
+# Copy and install requirements
 COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip cache purge && \
+    apk del gcc musl-dev libffi-dev && \
+    rm -rf ~/.cache
 
-# Install Python dependencies with optimizations and longer timeout
-RUN pip install --no-cache-dir --timeout 1000 -r requirements.txt
+# Copy only essential files
+COPY app.py ./
+COPY Procfile ./
+COPY *.json ./
 
-# Copy application files
-COPY . .
-
-# Create directory for model cache
-RUN mkdir -p /app/models
-
-# Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV TRANSFORMERS_CACHE=/app/models
-ENV HF_HOME=/app/models
-ENV SENTENCE_TRANSFORMERS_HOME=/app/models
 
-# Pre-download the model during build to avoid runtime delays
-RUN python startup.py
-
-# Expose port
 EXPOSE 8080
 
-# Use gunicorn for production with health check
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "300", "--keep-alive", "2", "--max-requests", "1000", "--preload", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "300", "app:app"]
